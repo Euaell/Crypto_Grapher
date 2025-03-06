@@ -73,13 +73,14 @@ export function base64ToFile(
   try {
     console.log(`Converting Base64 to File: ${fileName} (${mimeType})`);
     
-    // Add the data URL prefix if it's not already there
-    const dataUrl = base64String.includes('base64,') 
-      ? base64String 
-      : `data:${mimeType};base64,${base64String}`;
+    // Make sure we're working with raw base64 data
+    let rawBase64 = base64String;
+    if (base64String.includes('base64,')) {
+      rawBase64 = base64String.split('base64,')[1];
+    }
     
     // Convert base64 to binary
-    const byteString = atob(dataUrl.split(',')[1]);
+    const byteString = atob(rawBase64);
     const arrayBuffer = new ArrayBuffer(byteString.length);
     const intArray = new Uint8Array(arrayBuffer);
     
@@ -90,16 +91,10 @@ export function base64ToFile(
     // Create Blob and then File from the binary data
     const blob = new Blob([arrayBuffer], { type: mimeType });
     
-    // Check if File constructor is supported with the options parameter
-    try {
-      return new File([blob], fileName, { type: mimeType });
-    } catch (error) {
-      // Fallback for older browsers
-      const file = blob as any;
-      file.name = fileName;
-      file.lastModified = new Date();
-      return file as File;
-    }
+    // Create a File object
+    const file = new File([blob], fileName, { type: mimeType });
+    console.log(`File created: ${file.name} (${file.size} bytes)`);
+    return file;
   } catch (error) {
     console.error('Error in base64ToFile:', error);
     throw new Error(`Failed to convert Base64 to file: ${error instanceof Error ? error.message : String(error)}`);
@@ -193,6 +188,50 @@ export async function browserEncryptFile(
 }
 
 /**
+ * Reads an encrypted file and returns its contents as a string
+ */
+export function readEncryptedFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    try {
+      console.log(`Reading encrypted file: ${file.name} (${file.size} bytes)`);
+      
+      const reader = new FileReader();
+      
+      reader.onload = () => {
+        try {
+          if (typeof reader.result === 'string') {
+            console.log(`Successfully read encrypted file (${reader.result.length} chars)`);
+            resolve(reader.result);
+          } else if (reader.result instanceof ArrayBuffer) {
+            // Handle ArrayBuffer result
+            const decoder = new TextDecoder('utf-8');
+            const text = decoder.decode(new Uint8Array(reader.result));
+            console.log(`Successfully read encrypted file as ArrayBuffer (${text.length} chars)`);
+            resolve(text);
+          } else {
+            reject(new Error('FileReader result is not a string or ArrayBuffer'));
+          }
+        } catch (error) {
+          console.error('Error in FileReader onload handler:', error);
+          reject(error);
+        }
+      };
+      
+      reader.onerror = (error) => {
+        console.error('FileReader error:', error);
+        reject(new Error('Error reading encrypted file'));
+      };
+      
+      // Read as text rather than data URL
+      reader.readAsText(file);
+    } catch (error) {
+      console.error('Error in readEncryptedFile:', error);
+      reject(error);
+    }
+  });
+}
+
+/**
  * Decrypts an encrypted file
  */
 export async function browserDecryptFile(
@@ -200,7 +239,7 @@ export async function browserDecryptFile(
   key: string,
   onProgress?: (progress: number) => void
 ): Promise<FileBrowserEncryptionResult> {
-  console.log('Starting file decryption');
+  console.log('Starting file decryption process');
   const startTime = performance.now();
   
   try {
@@ -217,15 +256,29 @@ export async function browserDecryptFile(
     
     // Parse the encrypted data
     console.log('Parsing encrypted file data...');
-    let parsedData;
+    console.log('First 100 chars of encrypted data:', encryptedData.substring(0, 100) + '...');
     
+    let parsedData;
     try {
       parsedData = JSON.parse(encryptedData);
+      console.log('Successfully parsed JSON data');
     } catch (parseError) {
       console.error('JSON parse error:', parseError);
-      throw new Error('Invalid encrypted file format: not valid JSON');
+      
+      // Try to clean the data (sometimes extra characters can get into the file)
+      try {
+        const cleanedData = encryptedData.trim().replace(/^\uFEFF/, ''); // Remove BOM if present
+        console.log('Trying to parse cleaned data...');
+        parsedData = JSON.parse(cleanedData);
+        console.log('Successfully parsed cleaned JSON data');
+      } catch (secondError) {
+        console.error('Failed to parse even after cleaning:', secondError);
+        throw new Error('Invalid encrypted file format: not valid JSON');
+      }
     }
     
+    // Check the parsed data structure
+    console.log('Parsed data structure:', Object.keys(parsedData).join(', '));
     const { metadata, data } = parsedData;
     
     if (!metadata || !data) {
@@ -239,6 +292,13 @@ export async function browserDecryptFile(
       params 
     } = metadata;
     
+    console.log('Metadata:', {
+      originalFileName,
+      originalFileType,
+      algorithm,
+      params: JSON.stringify(params)
+    });
+    
     if (!originalFileName || !algorithm) {
       throw new Error('Missing required metadata in encrypted file');
     }
@@ -247,30 +307,40 @@ export async function browserDecryptFile(
     
     // Decrypt the file data
     console.log(`Decrypting file with algorithm: ${algorithm}`);
-    const decryptResult = await browserDecrypt(data, key, algorithm, params);
+    console.log(`Encrypted data length: ${data.length} chars`);
     
-    if (onProgress) onProgress(70);
-    
-    // Verify the decryption result
-    if (!decryptResult.result) {
-      throw new Error('Decryption returned empty result');
+    try {
+      const decryptResult = await browserDecrypt(data, key, algorithm, params);
+      console.log('File decryption completed successfully');
+      
+      if (onProgress) onProgress(70);
+      
+      // Verify the decryption result
+      if (!decryptResult.result) {
+        throw new Error('Decryption returned empty result');
+      }
+      
+      console.log(`Decrypted data length: ${decryptResult.result.length} chars`);
+      
+      if (onProgress) onProgress(100);
+      
+      const endTime = performance.now();
+      console.log(`File decryption completed in ${endTime - startTime}ms`);
+      
+      return {
+        result: decryptResult.result,
+        timeTaken: endTime - startTime,
+        algorithm,
+        params,
+        originalFileName,
+        originalFileType: originalFileType || 'application/octet-stream',
+        encryptedFileName: `${originalFileName}.encrypted`,
+        fileSize: decryptResult.result.length // Approximate size in bytes
+      };
+    } catch (decryptError) {
+      console.error('Error during file decryption:', decryptError);
+      throw new Error(`Failed to decrypt file: ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
     }
-    
-    if (onProgress) onProgress(100);
-    
-    const endTime = performance.now();
-    console.log(`File decryption completed in ${endTime - startTime}ms`);
-    
-    return {
-      result: decryptResult.result,
-      timeTaken: endTime - startTime,
-      algorithm,
-      params,
-      originalFileName,
-      originalFileType: originalFileType || 'application/octet-stream',
-      encryptedFileName: `${originalFileName}.encrypted`,
-      fileSize: decryptResult.result.length // Approximate size in bytes
-    };
   } catch (error) {
     console.error('File decryption error:', error);
     throw new Error(`File decryption failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -287,29 +357,53 @@ export function downloadDecryptedFile(
     console.log(`Preparing file for download: ${decryptedResult.originalFileName}`);
     
     const { result, originalFileName, originalFileType } = decryptedResult;
+    console.log(`Decrypted result length: ${result.length}, file type: ${originalFileType}`);
     
-    // Convert the base64 result back to a file
-    const file = base64ToFile(
-      result,
-      originalFileName,
-      originalFileType || 'application/octet-stream'
-    );
+    // For certain file types, we need to add the data URL prefix
+    let base64Data = result;
+    if (!result.includes('base64,')) {
+      base64Data = `data:${originalFileType || 'application/octet-stream'};base64,${result}`;
+    }
     
-    // Create a download link
-    const url = URL.createObjectURL(file);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = originalFileName;
-    document.body.appendChild(a);
-    a.click();
-    
-    // Clean up
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 100);
-    
-    console.log('File download initiated');
+    // Option 1: Convert the result back to a file
+    try {
+      const file = base64ToFile(
+        base64Data,
+        originalFileName,
+        originalFileType || 'application/octet-stream'
+      );
+      
+      // Create a download link
+      const url = URL.createObjectURL(file);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = originalFileName;
+      document.body.appendChild(a);
+      console.log('Triggering download...');
+      a.click();
+      
+      // Clean up
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        console.log('Download complete, cleaned up resources');
+      }, 100);
+    } catch (fileError) {
+      console.error('Error creating file from base64:', fileError);
+      
+      // Option 2: Direct data URL download as fallback
+      console.log('Falling back to direct data URL download');
+      const a = document.createElement('a');
+      a.href = base64Data;
+      a.download = originalFileName;
+      document.body.appendChild(a);
+      a.click();
+      
+      setTimeout(() => {
+        document.body.removeChild(a);
+        console.log('Fallback download complete');
+      }, 100);
+    }
   } catch (error) {
     console.error('Error downloading decrypted file:', error);
     throw new Error(`Failed to download decrypted file: ${error instanceof Error ? error.message : String(error)}`);

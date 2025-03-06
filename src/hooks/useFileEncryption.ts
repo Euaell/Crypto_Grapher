@@ -12,7 +12,8 @@ import {
   browserDecryptFile,
   downloadDecryptedFile,
   downloadEncryptedFile,
-  FileBrowserEncryptionResult
+  FileBrowserEncryptionResult,
+  readEncryptedFile
 } from '@/lib/crypto/browser-file-crypto';
 
 interface UseFileEncryptionOptions {
@@ -82,6 +83,8 @@ export function useFileEncryption(options: UseFileEncryptionOptions = {}) {
     setProgress(0);
     
     try {
+      console.log('Starting file decryption with key:', key.substring(0, 3) + '...');
+      
       // Use browser-based implementation
       const result = await browserDecryptFile(encryptedData, key, (p) => {
         setProgress(p);
@@ -94,6 +97,7 @@ export function useFileEncryption(options: UseFileEncryptionOptions = {}) {
         onComplete(result);
       }
     } catch (err) {
+      console.error('Decryption error:', err);
       setError(`File decryption failed: ${err instanceof Error ? err.message : String(err)}`);
       setProgress(0);
     } finally {
@@ -109,6 +113,27 @@ export function useFileEncryption(options: UseFileEncryptionOptions = {}) {
     setDecryptionResult(null);
     setError(null);
     setProgress(0);
+    
+    // If this is an encrypted file (based on name or type), try to read it
+    if (newFile && (newFile.name.endsWith('.encrypted') || newFile.type === 'application/json')) {
+      setIsDecrypting(true);
+      setProgress(10);
+      
+      // Read the encrypted file
+      readEncryptedFile(newFile)
+        .then(data => {
+          console.log('Successfully read encrypted file data');
+          setEncryptedData(data);
+          setProgress(20);
+        })
+        .catch(err => {
+          console.error('Error reading encrypted file:', err);
+          setError(`Failed to read encrypted file: ${err instanceof Error ? err.message : String(err)}`);
+        })
+        .finally(() => {
+          setIsDecrypting(false);
+        });
+    }
   }, []);
 
   // Function to handle encrypted data input (for decryption)
