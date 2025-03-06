@@ -2,6 +2,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { EncryptionAlgorithm } from '@/lib/crypto/encryption-service';
+import dynamic from 'next/dynamic';
+import { Button } from '@/components/ui/button';
 
 interface EncryptionVisualizerProps {
   algorithm: EncryptionAlgorithm;
@@ -22,6 +24,16 @@ export function EncryptionVisualizer({
 }: EncryptionVisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [animationFrame, setAnimationFrame] = useState<number | null>(null);
+  const [showDetailView, setShowDetailView] = useState<boolean>(false);
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState<EncryptionAlgorithm | null>(null);
+
+  // Dynamically import the AlgorithmDetailView to avoid SSR issues with Three.js
+  const AlgorithmDetailView = dynamic(
+    () => import('./AlgorithmDetailView'),
+    { ssr: false, loading: () => <div className="w-full h-[600px] flex items-center justify-center">
+      <div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-primary"></div>
+    </div> }
+  );
 
   // Calculate entropy of a string
   const calculateEntropy = (text: string): number => {
@@ -338,14 +350,48 @@ export function EncryptionVisualizer({
     ctx.fillText(`${Math.round(progress)}%`, width / 2, barY + barHeight + 20);
   };
 
+  // Add this function to handle drill-down navigation
+  const handleDrillDown = (algorithm: EncryptionAlgorithm) => {
+    setSelectedAlgorithm(algorithm);
+    setShowDetailView(true);
+  };
+
+  // Add this function to handle going back from the detail view
+  const handleBackFromDetail = () => {
+    setShowDetailView(false);
+    setSelectedAlgorithm(null);
+  };
+
+  // Modify the return statement to conditionally render the detail view
+  if (showDetailView && selectedAlgorithm) {
+    return (
+      <div className="w-full py-4">
+        <AlgorithmDetailView 
+          algorithm={selectedAlgorithm} 
+          onBack={handleBackFromDetail} 
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="w-full h-64 bg-gray-900 rounded-lg overflow-hidden">
-      <canvas
-        ref={canvasRef}
-        width={600}
-        height={256}
-        className="w-full h-full"
-      />
+    <div className="w-full h-full">
+      <div className="w-full h-64 bg-gray-900 rounded-lg overflow-hidden">
+        <canvas
+          ref={canvasRef}
+          width={600}
+          height={256}
+          className="w-full h-full"
+        />
+      </div>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="mt-2" 
+          onClick={() => handleDrillDown(algorithm)}
+        >
+          View Details
+        </Button>
     </div>
   );
 } 
