@@ -2,13 +2,18 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { 
-  encrypt, 
-  decrypt, 
   EncryptionAlgorithm, 
   EncryptionParams, 
   EncryptionResult,
   measureKeyStrength
 } from '@/lib/crypto/encryption-service';
+
+// Import browser-native crypto implementation instead of CryptoJS
+import {
+  browserEncrypt,
+  browserDecrypt,
+  browserMeasureKeyStrength
+} from '@/lib/crypto/browser-crypto';
 
 interface UseEncryptionOptions {
   liveTyping?: boolean;
@@ -39,7 +44,8 @@ export function useEncryption(options: UseEncryptionOptions = {}) {
   // Update key strength when key changes
   useEffect(() => {
     if (key) {
-      setKeyStrength(measureKeyStrength(key));
+      // Use the browser implementation instead of CryptoJS
+      setKeyStrength(browserMeasureKeyStrength(key));
     } else {
       setKeyStrength(0);
     }
@@ -120,7 +126,8 @@ export function useEncryption(options: UseEncryptionOptions = {}) {
         }, 200);
       }
       
-      const result = await encrypt(input, key, algorithm, params);
+      // Use browser crypto implementation instead of CryptoJS
+      const result = await browserEncrypt(input, key, algorithm, params);
       
       setEncryptionResult(result);
       setDecryptionResult(null);
@@ -168,7 +175,8 @@ export function useEncryption(options: UseEncryptionOptions = {}) {
         }, 200);
       }
       
-      const result = await decrypt(input, key, algorithm, params);
+      // Use browser crypto implementation instead of CryptoJS
+      const result = await browserDecrypt(input, key, algorithm, params);
       
       setDecryptionResult(result);
       setEncryptionResult(null);

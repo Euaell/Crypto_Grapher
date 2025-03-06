@@ -1,6 +1,7 @@
 "use client";
 
-import CryptoJS from 'crypto-js';
+// Use dynamic import instead of direct import
+// import CryptoJS from 'crypto-js';
 import { 
   EncryptionAlgorithm, 
   EncryptionParams, 
@@ -17,6 +18,48 @@ export interface FileEncryptionResult extends EncryptionResult {
 
 // Constants for chunking
 const CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+
+// Safe dynamic import of CryptoJS
+async function getCryptoJS() {
+  try {
+    // Only import in browser environment
+    if (typeof window !== 'undefined') {
+      // Create a safe environment for CryptoJS to initialize in
+      if (!globalThis.crypto) {
+        // Provide a minimal implementation if crypto is not available
+        globalThis.crypto = {
+          getRandomValues: function(buf: Uint8Array) {
+            const bytes = new Uint8Array(buf.length);
+            for (let i = 0; i < buf.length; i++) {
+              bytes[i] = Math.floor(Math.random() * 256);
+            }
+            buf.set(bytes);
+            return buf;
+          }
+        } as Crypto;
+      }
+      
+      // Dynamically import CryptoJS
+      try {
+        const CryptoJS = await import('crypto-js');
+        return CryptoJS.default || CryptoJS; // Handle both ESM and CommonJS
+      } catch (importError) {
+        console.error('Error importing CryptoJS:', importError);
+        
+        // As a fallback, try loading it from window if already loaded
+        if ((window as any).CryptoJS) {
+          return (window as any).CryptoJS;
+        }
+        
+        throw importError;
+      }
+    }
+    throw new Error('CryptoJS can only be used in browser environment');
+  } catch (error) {
+    console.error('Error loading CryptoJS:', error);
+    throw error;
+  }
+}
 
 // Helper to convert file to Base64
 export async function fileToBase64(file: File): Promise<string> {
@@ -73,7 +116,7 @@ export async function encryptFile(
     // For smaller files, we can encrypt directly
     if (file.size <= CHUNK_SIZE) {
       const fileData = await fileToBase64(file);
-      const encrypted = encryptFileData(fileData, key, algorithm, params);
+      const encrypted = await encryptFileData(fileData, key, algorithm, params);
       
       // Create metadata to store with the encrypted file
       const metadata = {
@@ -119,12 +162,14 @@ export async function encryptFile(
 }
 
 // Helper function to encrypt file data
-function encryptFileData(
+async function encryptFileData(
   fileData: string,
   key: string,
   algorithm: EncryptionAlgorithm,
   params: EncryptionParams
-): string {
+): Promise<string> {
+  const CryptoJS = await getCryptoJS();
+  
   switch (algorithm) {
     case EncryptionAlgorithm.AES:
       return CryptoJS.AES.encrypt(fileData, key).toString();
@@ -163,6 +208,7 @@ export async function decryptFile(
     
     // Decrypt the file data
     let decryptedData = '';
+    const CryptoJS = await getCryptoJS();
     
     switch (algorithm) {
       case EncryptionAlgorithm.AES:

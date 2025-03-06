@@ -1,6 +1,8 @@
 "use client";
 
-import CryptoJS from 'crypto-js';
+// Instead of importing CryptoJS directly at the top, we'll use dynamic imports
+// import CryptoJS from 'crypto-js';
+// This will be imported dynamically within each function that needs it
 
 // Define the encryption parameters interface
 export interface EncryptionParams {
@@ -53,8 +55,51 @@ const defaultParams: EncryptionParams = {
   keySize: 256 / 32
 };
 
+// Safe dynamic import of CryptoJS
+async function getCryptoJS() {
+  try {
+    // Only import in browser environment
+    if (typeof window !== 'undefined') {
+      // Create a safe environment for CryptoJS to initialize in
+      if (!globalThis.crypto) {
+        // Provide a minimal implementation if crypto is not available
+        globalThis.crypto = {
+          getRandomValues: function(buf: Uint8Array) {
+            const bytes = new Uint8Array(buf.length);
+            for (let i = 0; i < buf.length; i++) {
+              bytes[i] = Math.floor(Math.random() * 256);
+            }
+            buf.set(bytes);
+            return buf;
+          }
+        } as Crypto;
+      }
+      
+      // Dynamically import CryptoJS
+      try {
+        const CryptoJS = await import('crypto-js');
+        return CryptoJS.default || CryptoJS; // Handle both ESM and CommonJS
+      } catch (importError) {
+        console.error('Error importing CryptoJS:', importError);
+        
+        // As a fallback, try loading it from window if already loaded
+        if ((window as any).CryptoJS) {
+          return (window as any).CryptoJS;
+        }
+        
+        throw importError;
+      }
+    }
+    throw new Error('CryptoJS can only be used in browser environment');
+  } catch (error) {
+    console.error('Error loading CryptoJS:', error);
+    throw error;
+  }
+}
+
 // Utility function to get CryptoJS mode
-function getCryptoJSMode(mode: string) {
+async function getCryptoJSMode(mode: string) {
+  const CryptoJS = await getCryptoJS();
   switch (mode) {
     case EncryptionMode.ECB: return CryptoJS.mode.ECB;
     case EncryptionMode.CBC: return CryptoJS.mode.CBC;
@@ -66,7 +111,8 @@ function getCryptoJSMode(mode: string) {
 }
 
 // Utility function to get CryptoJS padding
-function getCryptoJSPadding(padding: string) {
+async function getCryptoJSPadding(padding: string) {
+  const CryptoJS = await getCryptoJS();
   switch (padding) {
     case PaddingMethod.NoPadding: return CryptoJS.pad.NoPadding;
     case PaddingMethod.PKCS7: return CryptoJS.pad.Pkcs7;
@@ -78,15 +124,16 @@ function getCryptoJSPadding(padding: string) {
 }
 
 // Get configuration object for CryptoJS
-function getCryptoConfig(params: EncryptionParams) {
+async function getCryptoConfig(params: EncryptionParams) {
+  const CryptoJS = await getCryptoJS();
   const config: any = {};
   
   if (params.mode) {
-    config.mode = getCryptoJSMode(params.mode);
+    config.mode = await getCryptoJSMode(params.mode);
   }
   
   if (params.padding) {
-    config.padding = getCryptoJSPadding(params.padding);
+    config.padding = await getCryptoJSPadding(params.padding);
   }
   
   if (params.iv) {
@@ -150,21 +197,23 @@ export async function encrypt(
   let result = '';
   
   try {
+    const CryptoJS = await getCryptoJS();
+    
     switch (algorithm) {
       case EncryptionAlgorithm.AES:
-        result = CryptoJS.AES.encrypt(text, key, getCryptoConfig(mergedParams)).toString();
+        result = CryptoJS.AES.encrypt(text, key, await getCryptoConfig(mergedParams)).toString();
         break;
       case EncryptionAlgorithm.DES:
-        result = CryptoJS.DES.encrypt(text, key, getCryptoConfig(mergedParams)).toString();
+        result = CryptoJS.DES.encrypt(text, key, await getCryptoConfig(mergedParams)).toString();
         break;
       case EncryptionAlgorithm.TripleDES:
-        result = CryptoJS.TripleDES.encrypt(text, key, getCryptoConfig(mergedParams)).toString();
+        result = CryptoJS.TripleDES.encrypt(text, key, await getCryptoConfig(mergedParams)).toString();
         break;
       case EncryptionAlgorithm.Rabbit:
-        result = CryptoJS.Rabbit.encrypt(text, key, getCryptoConfig(mergedParams)).toString();
+        result = CryptoJS.Rabbit.encrypt(text, key, await getCryptoConfig(mergedParams)).toString();
         break;
       case EncryptionAlgorithm.RC4:
-        result = CryptoJS.RC4.encrypt(text, key, getCryptoConfig(mergedParams)).toString();
+        result = CryptoJS.RC4.encrypt(text, key, await getCryptoConfig(mergedParams)).toString();
         break;
       case EncryptionAlgorithm.OTP:
         result = oneTimePad(text, key, true);
@@ -205,21 +254,23 @@ export async function decrypt(
   let result = '';
   
   try {
+    const CryptoJS = await getCryptoJS();
+    
     switch (algorithm) {
       case EncryptionAlgorithm.AES:
-        result = CryptoJS.AES.decrypt(ciphertext, key, getCryptoConfig(mergedParams)).toString(CryptoJS.enc.Utf8);
+        result = CryptoJS.AES.decrypt(ciphertext, key, await getCryptoConfig(mergedParams)).toString(CryptoJS.enc.Utf8);
         break;
       case EncryptionAlgorithm.DES:
-        result = CryptoJS.DES.decrypt(ciphertext, key, getCryptoConfig(mergedParams)).toString(CryptoJS.enc.Utf8);
+        result = CryptoJS.DES.decrypt(ciphertext, key, await getCryptoConfig(mergedParams)).toString(CryptoJS.enc.Utf8);
         break;
       case EncryptionAlgorithm.TripleDES:
-        result = CryptoJS.TripleDES.decrypt(ciphertext, key, getCryptoConfig(mergedParams)).toString(CryptoJS.enc.Utf8);
+        result = CryptoJS.TripleDES.decrypt(ciphertext, key, await getCryptoConfig(mergedParams)).toString(CryptoJS.enc.Utf8);
         break;
       case EncryptionAlgorithm.Rabbit:
-        result = CryptoJS.Rabbit.decrypt(ciphertext, key, getCryptoConfig(mergedParams)).toString(CryptoJS.enc.Utf8);
+        result = CryptoJS.Rabbit.decrypt(ciphertext, key, await getCryptoConfig(mergedParams)).toString(CryptoJS.enc.Utf8);
         break;
       case EncryptionAlgorithm.RC4:
-        result = CryptoJS.RC4.decrypt(ciphertext, key, getCryptoConfig(mergedParams)).toString(CryptoJS.enc.Utf8);
+        result = CryptoJS.RC4.decrypt(ciphertext, key, await getCryptoConfig(mergedParams)).toString(CryptoJS.enc.Utf8);
         break;
       case EncryptionAlgorithm.OTP:
         result = oneTimePad(atob(ciphertext), key, false);
@@ -249,26 +300,30 @@ export async function decrypt(
 }
 
 // Function to generate a cryptographically secure key
-export function generateSecureKey(length: number = 32): string {
+export async function generateSecureKey(length: number = 32): Promise<string> {
+  const CryptoJS = await getCryptoJS();
   const bytes = CryptoJS.lib.WordArray.random(length);
   return bytes.toString(CryptoJS.enc.Base64);
 }
 
 // Function to derive a key from a password
-export function deriveKeyFromPassword(
+export async function deriveKeyFromPassword(
   password: string,
-  salt: string = CryptoJS.lib.WordArray.random(128 / 8).toString(CryptoJS.enc.Hex),
+  salt?: string,
   iterations: number = 10000,
   keySize: number = 256 / 32
-): { key: string; salt: string } {
-  const derivedKey = CryptoJS.PBKDF2(password, salt, {
+): Promise<{ key: string; salt: string }> {
+  const CryptoJS = await getCryptoJS();
+  const saltValue = salt || CryptoJS.lib.WordArray.random(128 / 8).toString(CryptoJS.enc.Hex);
+  
+  const derivedKey = CryptoJS.PBKDF2(password, saltValue, {
     keySize,
     iterations
   });
   
   return {
     key: derivedKey.toString(CryptoJS.enc.Base64),
-    salt
+    salt: saltValue
   };
 }
 

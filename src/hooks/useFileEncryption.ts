@@ -2,19 +2,21 @@
 
 import { useState, useCallback } from 'react';
 import { 
-  encryptFile, 
-  decryptFile, 
-  downloadDecryptedFile, 
-  downloadEncryptedFile,
-  FileEncryptionResult
-} from '@/lib/crypto/file-encryption-service';
-import { 
   EncryptionAlgorithm, 
   EncryptionParams 
 } from '@/lib/crypto/encryption-service';
 
+// Import browser-based implementations
+import {
+  browserEncryptFile,
+  browserDecryptFile,
+  downloadDecryptedFile,
+  downloadEncryptedFile,
+  FileBrowserEncryptionResult
+} from '@/lib/crypto/browser-file-crypto';
+
 interface UseFileEncryptionOptions {
-  onComplete?: (result: FileEncryptionResult) => void;
+  onComplete?: (result: FileBrowserEncryptionResult) => void;
   defaultAlgorithm?: EncryptionAlgorithm;
 }
 
@@ -31,8 +33,8 @@ export function useFileEncryption(options: UseFileEncryptionOptions = {}) {
   const [params, setParams] = useState<EncryptionParams>({});
   const [isEncrypting, setIsEncrypting] = useState<boolean>(false);
   const [isDecrypting, setIsDecrypting] = useState<boolean>(false);
-  const [encryptionResult, setEncryptionResult] = useState<FileEncryptionResult | null>(null);
-  const [decryptionResult, setDecryptionResult] = useState<FileEncryptionResult | null>(null);
+  const [encryptionResult, setEncryptionResult] = useState<FileBrowserEncryptionResult | null>(null);
+  const [decryptionResult, setDecryptionResult] = useState<FileBrowserEncryptionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<number>(0);
 
@@ -48,7 +50,8 @@ export function useFileEncryption(options: UseFileEncryptionOptions = {}) {
     setProgress(0);
     
     try {
-      const result = await encryptFile(file, key, algorithm, params, (p) => {
+      // Use browser-based implementation
+      const result = await browserEncryptFile(file, key, algorithm, params, (p) => {
         setProgress(p);
       });
       
@@ -79,7 +82,8 @@ export function useFileEncryption(options: UseFileEncryptionOptions = {}) {
     setProgress(0);
     
     try {
-      const result = await decryptFile(encryptedData, key, (p) => {
+      // Use browser-based implementation
+      const result = await browserDecryptFile(encryptedData, key, (p) => {
         setProgress(p);
       });
       
