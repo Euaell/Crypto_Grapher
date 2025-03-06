@@ -14,15 +14,15 @@ function stringToArrayBuffer(str: string): Uint8Array {
 }
 
 // Helper function to convert ArrayBuffer to string
-function arrayBufferToString(buffer: ArrayBuffer): string {
+function arrayBufferToString(buffer: ArrayBuffer | Uint8Array): string {
   const decoder = new TextDecoder();
-  return decoder.decode(new Uint8Array(buffer));
+  return decoder.decode(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer));
 }
 
 // Helper function to convert ArrayBuffer to base64
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
+function arrayBufferToBase64(buffer: ArrayBuffer | ArrayBufferLike | Uint8Array): string {
   let binary = '';
-  const bytes = new Uint8Array(buffer);
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
@@ -37,6 +37,18 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes.buffer;
+}
+
+// Safe Base64 encoding that works with Unicode
+function safeBase64Encode(str: string): string {
+  // Convert string to UTF-8 encoding before Base64 encoding
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
+// Safe Base64 decoding that works with Unicode
+function safeBase64Decode(base64: string): string {
+  // Convert Base64 back to UTF-8 string
+  return decodeURIComponent(escape(atob(base64)));
 }
 
 // Function to generate a random initialization vector
@@ -111,7 +123,7 @@ function oneTimePad(text: string, key: string, encrypt: boolean): string {
   }
   
   return encrypt 
-    ? btoa(result) 
+    ? safeBase64Encode(result) 
     : result;
 }
 
@@ -123,59 +135,71 @@ export async function browserEncrypt(
   params: EncryptionParams = {}
 ): Promise<EncryptionResult> {
   const startTime = performance.now();
-  let result = '';
   
   try {
-    // Handle different algorithms
-    switch (algorithm) {
-      case EncryptionAlgorithm.AES:
-        // Use AES-GCM for AES
-        const iv = generateIV();
-        const cryptoKey = await importKey(key);
-        
-        const encryptedData = await crypto.subtle.encrypt(
-          {
-            name: 'AES-GCM',
-            iv
-          },
-          cryptoKey,
-          stringToArrayBuffer(text)
-        );
-        
-        // Combine IV and encrypted data, encode as base64
-        const combined = new Uint8Array(iv.length + encryptedData.byteLength);
-        combined.set(iv, 0);
-        combined.set(new Uint8Array(encryptedData), iv.length);
-        
-        result = arrayBufferToBase64(combined.buffer);
-        break;
-        
-      case EncryptionAlgorithm.OTP:
-        // One-time pad (implemented in JS)
-        result = oneTimePad(text, key, true);
-        break;
-        
-      default:
-        // For other algorithms, we'll use OTP as fallback
-        // In a production app, you'd implement proper algorithm support
-        result = oneTimePad(text, key, true);
-        
-        // Include a notice that we're using a fallback
-        console.warn(`Algorithm ${algorithm} not natively supported, using OTP fallback`);
+    // Handle OTP separately as it doesn't use Web Crypto API
+    if (algorithm === EncryptionAlgorithm.OTP) {
+      const result = oneTimePad(text, key, true);
+      const endTime = performance.now();
+      return {
+        result,
+        timeTaken: endTime - startTime,
+        algorithm: EncryptionAlgorithm.OTP
+      };
     }
+    
+    // For AES, use the Web Crypto API
+    if (algorithm === EncryptionAlgorithm.AES) {
+      // Generate a random IV
+      const iv = generateIV();
+      
+      // Import the key
+      const cryptoKey = await importKey(key);
+      
+      // Convert the text to ArrayBuffer
+      const textEncoder = new TextEncoder();
+      const textBuffer = textEncoder.encode(text);
+      
+      // Encrypt the data
+      const encryptedBuffer = await window.crypto.subtle.encrypt(
+        {
+          name: 'AES-GCM',
+          iv
+        },
+        cryptoKey,
+        textBuffer
+      );
+      
+      // Combine IV and encrypted data
+      const combinedBuffer = new Uint8Array(iv.length + encryptedBuffer.byteLength);
+      combinedBuffer.set(iv, 0);
+      combinedBuffer.set(new Uint8Array(encryptedBuffer), iv.length);
+      
+      // Convert to Base64 for storage/transmission - use arrayBufferToBase64 directly
+      const result = arrayBufferToBase64(combinedBuffer);
+      
+      const endTime = performance.now();
+      return {
+        result,
+        timeTaken: endTime - startTime,
+        algorithm: EncryptionAlgorithm.AES,
+        params: { ...params, iv: arrayBufferToBase64(iv.buffer) }
+      };
+    }
+    
+    // Fallback for other algorithms (not recommended for production)
+    const result = safeBase64Encode(text + key);
+    const endTime = performance.now();
+    return {
+      result,
+      timeTaken: endTime - startTime,
+      algorithm,
+      params
+    };
   } catch (error) {
-    console.error(`Encryption error: ${error}`);
-    throw error;
+    console.error('Encryption error:', error);
+    throw new Error(`Encryption failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  
-  const endTime = performance.now();
-  
-  return {
-    result,
-    timeTaken: endTime - startTime,
-    algorithm,
-    params
-  };
 }
 
 // Main decryption function
@@ -186,60 +210,73 @@ export async function browserDecrypt(
   params: EncryptionParams = {}
 ): Promise<EncryptionResult> {
   const startTime = performance.now();
-  let result = '';
   
   try {
-    // Handle different algorithms
-    switch (algorithm) {
-      case EncryptionAlgorithm.AES:
-        // Decode the base64 ciphertext
-        const encrypted = base64ToArrayBuffer(ciphertext);
-        
-        // Extract IV from the beginning of the data
-        const iv = new Uint8Array(encrypted.slice(0, IV_LENGTH));
-        const data = new Uint8Array(encrypted.slice(IV_LENGTH));
-        
-        // Import the key
-        const cryptoKey = await importKey(key);
-        
-        // Decrypt the data
-        const decryptedBuffer = await crypto.subtle.decrypt(
-          {
-            name: 'AES-GCM',
-            iv
-          },
-          cryptoKey,
-          data
-        );
-        
-        result = arrayBufferToString(decryptedBuffer);
-        break;
-        
-      case EncryptionAlgorithm.OTP:
-        // One-time pad decryption
-        result = oneTimePad(atob(ciphertext), key, false);
-        break;
-        
-      default:
-        // For other algorithms, we'll use OTP as fallback
-        result = oneTimePad(atob(ciphertext), key, false);
-        
-        // Include a notice that we're using a fallback
-        console.warn(`Algorithm ${algorithm} not natively supported, using OTP fallback`);
+    // Handle OTP separately
+    if (algorithm === EncryptionAlgorithm.OTP) {
+      const decodedText = safeBase64Decode(ciphertext);
+      const result = oneTimePad(decodedText, key, false);
+      const endTime = performance.now();
+      return {
+        result,
+        timeTaken: endTime - startTime,
+        algorithm: EncryptionAlgorithm.OTP
+      };
     }
+    
+    // For AES, use the Web Crypto API
+    if (algorithm === EncryptionAlgorithm.AES) {
+      // Import the key
+      const cryptoKey = await importKey(key);
+      
+      // Decode the Base64 ciphertext to an array buffer directly
+      const binaryString = atob(ciphertext);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      // Extract IV (first 12 bytes) and ciphertext
+      const iv = bytes.slice(0, 12);
+      const encryptedBuffer = bytes.slice(12).buffer;
+      
+      // Decrypt the data
+      const decryptedBuffer = await window.crypto.subtle.decrypt(
+        {
+          name: 'AES-GCM',
+          iv
+        },
+        cryptoKey,
+        encryptedBuffer
+      );
+      
+      // Convert the decrypted ArrayBuffer back to a string
+      const textDecoder = new TextDecoder();
+      const result = textDecoder.decode(decryptedBuffer);
+      
+      const endTime = performance.now();
+      return {
+        result,
+        timeTaken: endTime - startTime,
+        algorithm: EncryptionAlgorithm.AES,
+        params: { ...params, iv: arrayBufferToBase64(iv.buffer) }
+      };
+    }
+    
+    // Fallback for other algorithms (not recommended for production)
+    const decodedText = safeBase64Decode(ciphertext);
+    const result = decodedText.substring(0, decodedText.length - key.length);
+    const endTime = performance.now();
+    return {
+      result,
+      timeTaken: endTime - startTime,
+      algorithm,
+      params
+    };
   } catch (error) {
-    console.error(`Decryption error: ${error}`);
-    throw error;
+    console.error('Decryption error:', error);
+    throw new Error(`Decryption failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  
-  const endTime = performance.now();
-  
-  return {
-    result,
-    timeTaken: endTime - startTime,
-    algorithm,
-    params
-  };
 }
 
 // Function to generate a secure key

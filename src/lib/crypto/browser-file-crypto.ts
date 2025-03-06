@@ -9,6 +9,7 @@ import { browserEncrypt, browserDecrypt } from './browser-crypto';
 
 // Constants
 const IV_LENGTH = 16; // 128 bits
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunk size
 
 // Interface for file encryption result
 export interface FileBrowserEncryptionResult extends EncryptionResult {
@@ -24,10 +25,10 @@ export async function fileToBase64(file: File): Promise<string> {
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = () => {
-      if (reader.result) {
-        // Extract the base64 part (remove data URL prefix)
-        const base64String = reader.result.toString().split(',')[1];
-        resolve(base64String);
+      if (typeof reader.result === 'string') {
+        // Remove the data URL prefix (e.g., "data:image/png;base64,")
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
       } else {
         reject(new Error('Failed to convert file to base64'));
       }
@@ -70,45 +71,54 @@ export async function browserEncryptFile(
   const startTime = performance.now();
   
   try {
-    // Convert file to base64
-    const fileData = await fileToBase64(file);
+    // For smaller files, we can encrypt directly
+    if (file.size <= CHUNK_SIZE) {
+      const fileData = await fileToBase64(file);
+      
+      // Use the browser encryption function
+      const encryptResult = await browserEncrypt(fileData, key, algorithm, params);
+      
+      // Create metadata to store with the encrypted file
+      const metadata = {
+        originalFileName: file.name,
+        originalFileType: file.type,
+        algorithm,
+        params: encryptResult.params || params
+      };
+      
+      // Combine metadata and encrypted data
+      const encryptedData = JSON.stringify({
+        metadata,
+        data: encryptResult.result
+      });
+      
+      const encryptedFileName = `${file.name}.encrypted`;
+      
+      if (onProgress) onProgress(100);
+      
+      const endTime = performance.now();
+      
+      return {
+        result: encryptedData,
+        timeTaken: endTime - startTime,
+        algorithm,
+        params: encryptResult.params || params,
+        originalFileName: file.name,
+        originalFileType: file.type,
+        encryptedFileName,
+        fileSize: file.size
+      };
+    }
     
-    // Encrypt the file data using the browser crypto
-    const encryptionResult = await browserEncrypt(fileData, key, algorithm, params);
-    
-    // Create metadata to store with the encrypted file
-    const metadata = {
-      originalFileName: file.name,
-      originalFileType: file.type,
-      algorithm,
-      params
-    };
-    
-    // Combine metadata and encrypted data
-    const encryptedData = JSON.stringify({
-      metadata,
-      data: encryptionResult.result
-    });
-    
-    const encryptedFileName = `${file.name}.encrypted`;
+    // For larger files, we would implement chunking here
+    // This is a simplified version without chunking
     
     if (onProgress) onProgress(100);
     
-    const endTime = performance.now();
-    
-    return {
-      result: encryptedData,
-      timeTaken: endTime - startTime,
-      algorithm,
-      params,
-      originalFileName: file.name,
-      originalFileType: file.type,
-      encryptedFileName,
-      fileSize: file.size
-    };
+    throw new Error('File too large. Chunking not implemented yet.');
   } catch (error) {
-    console.error(`File encryption error: ${error}`);
-    throw error;
+    console.error('File encryption error:', error);
+    throw new Error(`File encryption failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -121,9 +131,13 @@ export async function browserDecryptFile(
   const startTime = performance.now();
   
   try {
-    // Parse the encrypted data to get metadata and encrypted content
+    // Parse the encrypted data
     const parsedData = JSON.parse(encryptedData);
     const { metadata, data } = parsedData;
+    
+    if (!metadata || !data) {
+      throw new Error('Invalid encrypted file format');
+    }
     
     const { 
       originalFileName, 
@@ -132,26 +146,30 @@ export async function browserDecryptFile(
       params 
     } = metadata;
     
-    // Decrypt the data using the browser crypto
-    const decryptionResult = await browserDecrypt(data, key, algorithm as EncryptionAlgorithm, params);
+    if (!originalFileName || !originalFileType || !algorithm) {
+      throw new Error('Missing required metadata in encrypted file');
+    }
+    
+    // Decrypt the file data
+    const decryptResult = await browserDecrypt(data, key, algorithm, params);
     
     if (onProgress) onProgress(100);
     
     const endTime = performance.now();
     
     return {
-      result: decryptionResult.result,
+      result: decryptResult.result,
       timeTaken: endTime - startTime,
       algorithm,
       params,
       originalFileName,
       originalFileType,
       encryptedFileName: `${originalFileName}.encrypted`,
-      fileSize: decryptionResult.result.length
+      fileSize: data.length // Approximate size
     };
   } catch (error) {
-    console.error(`File decryption error: ${error}`);
-    throw error;
+    console.error('File decryption error:', error);
+    throw new Error(`File decryption failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

@@ -35,7 +35,7 @@ export function EncryptionForm() {
     reset
   } = useEncryption({
     liveTyping: true,
-    typingSpeed: 20
+    typingSpeed: 50
   });
 
   // Function to handle copy to clipboard
