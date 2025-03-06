@@ -1,5 +1,11 @@
+"use client";
+
 import { MainLayout } from '@/components/layout/MainLayout';
 import { AlgorithmComparison } from '@/components/visualization/AlgorithmComparison';
+
+// This explicitly configures the page for client-side only rendering
+export const dynamic = 'force-dynamic';
+export const runtime = 'edge'; // This ensures we're not trying to use Node.js APIs in this page
 
 export default function ComparePage() {
   return (

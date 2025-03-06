@@ -192,7 +192,7 @@ export function EncryptionParameters({
             className="mt-1 block w-full rounded-md bg-gray-700 border-gray-600 text-white focus:border-blue-500 focus:ring-blue-500"
           />
           <p className="mt-1 text-sm text-gray-400">
-            Optional: IV should be unique but doesn't need to be secret.
+            Optional: IV should be unique but doesn&apos;t need to be secret.
           </p>
         </div>
       )}

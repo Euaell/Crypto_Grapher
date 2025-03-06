@@ -1,3 +1,5 @@
+"use client";
+
 import CryptoJS from 'crypto-js';
 
 // Define the encryption parameters interface
