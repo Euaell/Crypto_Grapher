@@ -74,7 +74,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
               {/* GitHub link */}
               <a
-                href="https://github.com/yourusername/crypto-grapher"
+                href="https://github.com/Euaell/Crypto_Grapher"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="ml-4 flex items-center text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"

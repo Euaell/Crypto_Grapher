@@ -188,7 +188,7 @@ export function Landing() {
       {/* GitHub link */}
       <div className="text-center py-12">
         <a 
-          href="https://github.com/yourusername/crypto-grapher" 
+          href="https://github.com/Euaell/Crypto_Grapher" 
           target="_blank" 
           rel="noopener noreferrer"
           className="inline-flex items-center px-6 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"

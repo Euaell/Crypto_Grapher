@@ -43,7 +43,7 @@ A modern encryption tool built with Next.js 14, featuring advanced visualization
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/crypto-grapher.git
+   git clone https://github.com/Euaell/Crypto_Grapher.git
    cd crypto-grapher
    ```
 
