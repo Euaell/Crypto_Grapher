@@ -10,6 +10,8 @@ interface OperationNodeProps {
   operation: Operation;
   animate: boolean;
   enterDelay: number;
+  exiting?: boolean;
+  onExitComplete?: () => void;
 }
 
 const operationSymbols: Record<string, string> = {
@@ -29,20 +31,23 @@ const operationSymbols: Record<string, string> = {
   substitute: '\u03C3',
 };
 
-export default function OperationNode({ operation, animate, enterDelay }: OperationNodeProps) {
+export default function OperationNode({ operation, animate, enterDelay, exiting, onExitComplete }: OperationNodeProps) {
   const groupRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.Mesh>(null);
   const materialRef = useRef<THREE.MeshStandardMaterial>(null);
   const ringRef = useRef<THREE.Mesh>(null);
+  const ringMatRef = useRef<THREE.MeshStandardMaterial>(null);
 
   const animState = useRef({
     scale: 0,
     opacity: 0,
     enterTimer: 0,
+    exitTimer: 0,
     rotation: 0,
     posX: operation.x,
     posY: -operation.y,
     posZ: operation.z,
+    didNotifyExit: false,
   });
 
   const targetPos = useRef(new THREE.Vector3(operation.x, -operation.y, operation.z));
@@ -54,7 +59,16 @@ export default function OperationNode({ operation, animate, enterDelay }: Operat
     animState.current.enterTimer = 0;
     animState.current.scale = 0;
     animState.current.opacity = 0;
+    animState.current.exitTimer = 0;
+    animState.current.didNotifyExit = false;
   }, [operation.id, enterDelay]);
+
+  useEffect(() => {
+    if (exiting) {
+      animState.current.exitTimer = 0;
+      animState.current.didNotifyExit = false;
+    }
+  }, [exiting]);
 
   useFrame((_, delta) => {
     const st = animState.current;
@@ -62,46 +76,53 @@ export default function OperationNode({ operation, animate, enterDelay }: Operat
     const mat = materialRef.current;
     if (!group || !mat) return;
 
-    // Entrance
+    // Exit
+    if (exiting) {
+      st.exitTimer += delta;
+      st.scale = THREE.MathUtils.lerp(st.scale, 0, 8 * delta);
+      st.opacity = THREE.MathUtils.lerp(st.opacity, 0, 8 * delta);
+      group.scale.setScalar(Math.max(0.001, st.scale));
+      mat.opacity = st.opacity;
+      if (ringMatRef.current) ringMatRef.current.opacity = 0;
+      if (st.exitTimer > 0.3 && !st.didNotifyExit) {
+        st.didNotifyExit = true;
+        onExitComplete?.();
+      }
+      return;
+    }
+
+    // Enter
     st.enterTimer += delta;
     const enterProgress = Math.max(0, Math.min(1, (st.enterTimer - enterDelay) / 0.5));
     const eased = 1 - Math.pow(1 - enterProgress, 3);
 
-    // Position lerp
     const ls = 6 * delta;
     st.posX = THREE.MathUtils.lerp(st.posX, targetPos.current.x, ls);
     st.posY = THREE.MathUtils.lerp(st.posY, targetPos.current.y, ls);
     st.posZ = THREE.MathUtils.lerp(st.posZ, targetPos.current.z, ls);
     group.position.set(st.posX, st.posY, st.posZ);
 
-    // Scale
     st.scale = THREE.MathUtils.lerp(st.scale, eased, 8 * delta);
     group.scale.setScalar(Math.max(0.001, st.scale));
 
-    // Opacity
     st.opacity = THREE.MathUtils.lerp(st.opacity, 0.85 * eased, 8 * delta);
     mat.opacity = st.opacity;
 
-    // Rotation
-    if (animate) {
-      st.rotation += delta * 0.6;
-    }
+    if (animate) st.rotation += delta * 0.6;
     if (meshRef.current) {
       meshRef.current.rotation.y = st.rotation;
       meshRef.current.rotation.z = Math.sin(st.rotation * 0.7) * 0.15;
     }
 
-    // Pulsing ring
-    if (ringRef.current) {
+    if (ringRef.current && ringMatRef.current) {
       const pulse = 1 + Math.sin(Date.now() * 0.004) * 0.1;
       ringRef.current.scale.setScalar(pulse);
-      (ringRef.current.material as THREE.MeshStandardMaterial).opacity = st.opacity * 0.2;
+      ringMatRef.current.opacity = st.opacity * 0.2;
     }
   });
 
   return (
     <group ref={groupRef}>
-      {/* Main shape */}
       <mesh ref={meshRef}>
         <octahedronGeometry args={[0.22, 1]} />
         <meshStandardMaterial
@@ -117,10 +138,10 @@ export default function OperationNode({ operation, animate, enterDelay }: Operat
         />
       </mesh>
 
-      {/* Pulsing ring */}
       <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[0.35, 0.01, 8, 32]} />
         <meshStandardMaterial
+          ref={ringMatRef}
           color={operation.color}
           emissive={operation.color}
           emissiveIntensity={0.5}

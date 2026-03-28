@@ -10,40 +10,51 @@ interface DataBlockMeshProps {
   block: DataBlock;
   highlighted: boolean;
   animate: boolean;
-  enterDelay: number; // staggered entrance delay in seconds
+  enterDelay: number;
+  exiting?: boolean; // true when this block is fading out
+  onExitComplete?: () => void;
 }
 
-export default function DataBlockMesh({ block, highlighted, animate, enterDelay }: DataBlockMeshProps) {
+export default function DataBlockMesh({ block, highlighted, animate, enterDelay, exiting, onExitComplete }: DataBlockMeshProps) {
   const groupRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.Mesh>(null);
   const materialRef = useRef<THREE.MeshStandardMaterial>(null);
+  const glowMatRef = useRef<THREE.MeshStandardMaterial>(null);
   const [hovered, setHovered] = useState(false);
 
-  // Animated state tracked via refs for 60fps lerping
   const animState = useRef({
     posX: block.x,
     posY: -block.y,
     posZ: block.z,
-    scale: 0, // start at 0 for entrance animation
+    scale: 0,
     opacity: 0,
     emissive: 0,
     enterTimer: 0,
-    alive: true,
+    exitTimer: 0,
+    didNotifyExit: false,
   });
 
-  // Track target changes
   const targetPos = useRef(new THREE.Vector3(block.x, -block.y, block.z));
   useEffect(() => {
     targetPos.current.set(block.x, -block.y, block.z);
   }, [block.x, block.y, block.z]);
 
-  // Reset entrance animation when block identity or enterDelay changes
+  // Reset entrance on new identity
   useEffect(() => {
     animState.current.enterTimer = 0;
     animState.current.scale = 0;
     animState.current.opacity = 0;
-    animState.current.alive = true;
+    animState.current.exitTimer = 0;
+    animState.current.didNotifyExit = false;
   }, [block.id, enterDelay]);
+
+  // Start exit timer when exiting flips to true
+  useEffect(() => {
+    if (exiting) {
+      animState.current.exitTimer = 0;
+      animState.current.didNotifyExit = false;
+    }
+  }, [exiting]);
 
   const typeColors: Record<string, string> = {
     data: '#3b82f6',
@@ -62,43 +73,68 @@ export default function DataBlockMesh({ block, highlighted, animate, enterDelay 
     const mat = materialRef.current;
     if (!group || !mat) return;
 
-    // Entrance stagger: wait for enterDelay before starting
+    // --- EXIT ANIMATION ---
+    if (exiting) {
+      st.exitTimer += delta;
+      const exitDuration = 0.3;
+      const exitProgress = Math.min(1, st.exitTimer / exitDuration);
+      const easedExit = exitProgress * exitProgress; // ease-in quad
+
+      st.scale = THREE.MathUtils.lerp(st.scale, 0, 6 * delta);
+      st.opacity = THREE.MathUtils.lerp(st.opacity, 0, 8 * delta);
+
+      group.scale.setScalar(Math.max(0.001, st.scale));
+      mat.opacity = st.opacity;
+      if (glowMatRef.current) glowMatRef.current.opacity = st.opacity * 0.15;
+
+      // Notify parent when exit is complete
+      if (exitProgress >= 1 && !st.didNotifyExit) {
+        st.didNotifyExit = true;
+        onExitComplete?.();
+      }
+      return;
+    }
+
+    // --- ENTER ANIMATION ---
     st.enterTimer += delta;
-    const enterProgress = Math.max(0, Math.min(1, (st.enterTimer - enterDelay) / 0.4)); // 400ms fade-in
+    const enterProgress = Math.max(0, Math.min(1, (st.enterTimer - enterDelay) / 0.4));
     const easedEnter = enterProgress < 1
-      ? 1 - Math.pow(1 - enterProgress, 3) // ease-out cubic
+      ? 1 - Math.pow(1 - enterProgress, 3)
       : 1;
 
-    // Smoothly lerp position toward target
-    const lerpSpeed = 6 * delta;
-    st.posX = THREE.MathUtils.lerp(st.posX, targetPos.current.x, lerpSpeed);
-    st.posY = THREE.MathUtils.lerp(st.posY, targetPos.current.y, lerpSpeed);
-    st.posZ = THREE.MathUtils.lerp(st.posZ, targetPos.current.z, lerpSpeed);
+    // Smoothly lerp position
+    const ls = 6 * delta;
+    st.posX = THREE.MathUtils.lerp(st.posX, targetPos.current.x, ls);
+    st.posY = THREE.MathUtils.lerp(st.posY, targetPos.current.y, ls);
+    st.posZ = THREE.MathUtils.lerp(st.posZ, targetPos.current.z, ls);
     group.position.set(st.posX, st.posY, st.posZ);
 
-    // Scale entrance
-    const targetScale = easedEnter;
-    st.scale = THREE.MathUtils.lerp(st.scale, targetScale, 8 * delta);
+    // Scale
+    st.scale = THREE.MathUtils.lerp(st.scale, easedEnter, 8 * delta);
     group.scale.setScalar(Math.max(0.001, st.scale));
 
-    // Opacity entrance
-    const baseOpacity = (hovered ? Math.min(targetOpacity + 0.1, 1) : targetOpacity * 0.9);
-    st.opacity = THREE.MathUtils.lerp(st.opacity, baseOpacity * easedEnter, 8 * delta);
+    // Opacity
+    const baseOp = (hovered ? Math.min(targetOpacity + 0.1, 1) : targetOpacity * 0.9);
+    st.opacity = THREE.MathUtils.lerp(st.opacity, baseOp * easedEnter, 8 * delta);
     mat.opacity = st.opacity;
 
-    // Emissive for highlight
-    const targetEmissive = highlighted ? 0.35 : 0;
-    st.emissive = THREE.MathUtils.lerp(st.emissive, targetEmissive, 5 * delta);
+    // Glow
+    if (glowMatRef.current) {
+      glowMatRef.current.opacity = highlighted ? st.opacity * 0.2 : 0;
+    }
+
+    // Emissive
+    const tgtE = highlighted ? 0.35 : 0;
+    st.emissive = THREE.MathUtils.lerp(st.emissive, tgtE, 5 * delta);
     mat.emissiveIntensity = st.emissive;
 
     // Subtle highlight float
     if (highlighted && animate) {
-      group.position.z += Math.sin(Date.now() * 0.003) * 0.04;
+      group.position.z += Math.sin(Date.now() * 0.003) * 0.03;
     }
 
-    // Gentle hover pulse
     if (hovered) {
-      const pulse = 1 + Math.sin(Date.now() * 0.005) * 0.02;
+      const pulse = 1 + Math.sin(Date.now() * 0.005) * 0.015;
       group.scale.multiplyScalar(pulse);
     }
   });
@@ -129,25 +165,24 @@ export default function DataBlockMesh({ block, highlighted, animate, enterDelay 
         </RoundedBox>
       </mesh>
 
-      {/* Subtle border glow for highlighted blocks */}
-      {highlighted && (
-        <mesh scale={[1.04, 1.06, 1]}>
-          <RoundedBox
-            args={[block.width, block.height, 0.02]}
-            radius={0.06}
-            smoothness={4}
-          >
-            <meshStandardMaterial
-              color={baseColor}
-              transparent
-              opacity={0.15}
-              emissive={baseColor}
-              emissiveIntensity={0.6}
-              depthWrite={false}
-            />
-          </RoundedBox>
-        </mesh>
-      )}
+      {/* Glow ring for highlighted */}
+      <mesh scale={[1.04, 1.06, 1]}>
+        <RoundedBox
+          args={[block.width, block.height, 0.02]}
+          radius={0.06}
+          smoothness={4}
+        >
+          <meshStandardMaterial
+            ref={glowMatRef}
+            color={baseColor}
+            transparent
+            opacity={0}
+            emissive={baseColor}
+            emissiveIntensity={0.6}
+            depthWrite={false}
+          />
+        </RoundedBox>
+      </mesh>
 
       <Html
         position={[0, 0, 0.1]}
