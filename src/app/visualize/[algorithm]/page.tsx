@@ -148,15 +148,10 @@ export default function VisualizePage({ params }: PageProps) {
         {/* 3D Visualization */}
         <div className="flex-1 relative">
           <Scene3D zoom={zoom}>
-            <AnimatePresence mode="wait">
-              {currentStep && (
-                <StepVisualization
-                  key={currentStep.id}
-                  step={currentStep}
-                  animate={isPlaying}
-                />
-              )}
-            </AnimatePresence>
+            <StepVisualization
+              step={currentStep || null}
+              animate={isPlaying}
+            />
           </Scene3D>
 
           {/* Overlay controls */}
