@@ -1,13 +1,9 @@
-import { Inter } from "next/font/google";
 import "./globals.css";
-import { ThemeProvider } from "@/components/theme-provider";
 import { Metadata } from "next";
 
-const inter = Inter({ subsets: ["latin"] });
-
 export const metadata: Metadata = {
-  title: "Crypto Grapher",
-  description: "Modern encryption tool for text and files with visualization features",
+  title: "Crypto Grapher - Interactive Cryptographic Visualization",
+  description: "Explore 29+ cryptographic algorithms with interactive 3D visualizations. Watch AES, RSA, SHA-256, and more execute step by step.",
   manifest: "/manifest.json",
   icons: {
     icon: "/icons/icon-192x192.png",
@@ -26,16 +22,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          {children}
-        </ThemeProvider>
+    <html lang="en" className="dark">
+      <body className="bg-[#0a0a0f] text-white antialiased" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+        {children}
       </body>
     </html>
   );
