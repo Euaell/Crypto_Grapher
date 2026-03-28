@@ -147,9 +147,10 @@ export default function VisualizePage({ params }: PageProps) {
       <div className="flex-1 flex overflow-hidden">
         {/* 3D Visualization */}
         <div className="flex-1 relative">
-          <Scene3D zoom={zoom}>
+          <Scene3D zoom={zoom} followY={currentStepIndex * 5}>
             <StepVisualization
-              step={currentStep || null}
+              steps={steps}
+              currentStepIndex={currentStepIndex}
               animate={isPlaying}
             />
           </Scene3D>

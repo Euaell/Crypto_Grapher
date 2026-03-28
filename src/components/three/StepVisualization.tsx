@@ -1,203 +1,172 @@
 'use client';
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { VisualizationStep, DataBlock, Connection, Operation } from '@/lib/algorithms/types';
+import { VisualizationStep } from '@/lib/algorithms/types';
 import DataBlockMesh from './DataBlockMesh';
 import ConnectionLine from './ConnectionLine';
 import OperationNode from './OperationNode';
+import FlowConnector from './FlowConnector';
 import * as THREE from 'three';
 
 interface StepVisualizationProps {
-  step: VisualizationStep | null;
+  steps: VisualizationStep[];
+  currentStepIndex: number;
   animate: boolean;
 }
 
-// A "layer" is a snapshot of one step's elements, either entering or exiting
-interface Layer {
-  id: string; // unique layer id
-  stepId: string;
-  blocks: DataBlock[];
-  connections: Connection[];
-  operations: Operation[];
-  highlights: string[];
-  exiting: boolean;
-}
+// Vertical spacing between steps in the pipeline
+const STEP_Y_SPACING = 5;
 
-let layerCounter = 0;
-
-export default function StepVisualization({ step, animate }: StepVisualizationProps) {
-  const [layers, setLayers] = useState<Layer[]>([]);
-  const prevStepId = useRef<string | null>(null);
-  const exitCounters = useRef<Map<string, number>>(new Map());
-
-  // When step changes, mark old layers as exiting and add new layer
-  useEffect(() => {
-    const newStepId = step?.id ?? null;
-    if (newStepId === prevStepId.current) return;
-    prevStepId.current = newStepId;
-
-    setLayers(prev => {
-      // Mark all existing layers as exiting
-      const updated = prev.map(l => l.exiting ? l : { ...l, exiting: true });
-
-      // Add new layer if we have a step
-      if (step) {
-        const layerId = `layer-${++layerCounter}`;
-        // Count total elements for exit tracking
-        const totalElements = step.blocks.length + step.connections.length + step.operations.length;
-        exitCounters.current.set(layerId, 0);
-
-        updated.push({
-          id: layerId,
-          stepId: step.id,
-          blocks: step.blocks,
-          connections: step.connections,
-          operations: step.operations,
-          highlights: step.highlights,
-          exiting: false,
-        });
-      }
-
-      return updated;
-    });
-  }, [step]);
-
-  // Remove a layer when all its elements have finished exiting
-  const handleElementExitComplete = useCallback((layerId: string, totalElements: number) => {
-    const count = (exitCounters.current.get(layerId) ?? 0) + 1;
-    exitCounters.current.set(layerId, count);
-
-    if (count >= totalElements) {
-      exitCounters.current.delete(layerId);
-      setLayers(prev => prev.filter(l => l.id !== layerId));
-    }
-  }, []);
-
-  // Safety: force-remove exiting layers after a timeout to prevent stuck layers
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setLayers(prev => {
-        // Keep all non-exiting layers, and exiting layers less than 2 entries old
-        // (simple cleanup - in practice the exit callbacks handle this)
-        return prev.filter(l => !l.exiting || Date.now() < 0); // keep all, timeout handled by callbacks
-      });
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Failsafe: auto-remove exiting layers after 1 second
-  const exitTimestamps = useRef<Map<string, number>>(new Map());
-  useEffect(() => {
-    layers.forEach(l => {
-      if (l.exiting && !exitTimestamps.current.has(l.id)) {
-        exitTimestamps.current.set(l.id, Date.now());
-      }
-    });
-    // Clean up timestamps for removed layers
-    exitTimestamps.current.forEach((_, id) => {
-      if (!layers.find(l => l.id === id)) {
-        exitTimestamps.current.delete(id);
-      }
-    });
-  }, [layers]);
-
-  // Timer to force-remove stuck exiting layers
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const now = Date.now();
-      let shouldUpdate = false;
-      exitTimestamps.current.forEach((timestamp, id) => {
-        if (now - timestamp > 800) {
-          shouldUpdate = true;
-        }
-      });
-      if (shouldUpdate) {
-        setLayers(prev => prev.filter(l => {
-          if (!l.exiting) return true;
-          const ts = exitTimestamps.current.get(l.id);
-          if (ts && Date.now() - ts > 800) {
-            exitTimestamps.current.delete(l.id);
-            exitCounters.current.delete(l.id);
-            return false;
-          }
-          return true;
-        }));
-      }
-    }, 200);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Compute stagger delays
-  const getBlockDelay = (index: number, total: number) => 0.05 + index * 0.05;
-  const getConnDelay = (index: number, blockCount: number) => 0.05 + blockCount * 0.03 + index * 0.06;
-  const getOpDelay = (index: number, blockCount: number) => 0.05 + blockCount * 0.03 + index * 0.05;
-
-  // Grid
+export default function StepVisualization({ steps, currentStepIndex, animate }: StepVisualizationProps) {
   const gridRef = useRef<THREE.GridHelper>(null);
+
+  // Compute how many steps to show: all up to and including currentStepIndex
+  const visibleSteps = steps.slice(0, currentStepIndex + 1);
+
+  // Grid extends to cover the full pipeline
+  const gridHeight = Math.max(20, (currentStepIndex + 2) * STEP_Y_SPACING);
+
   useFrame((_, delta) => {
     if (gridRef.current && gridRef.current.material) {
       const mat = gridRef.current.material as THREE.LineBasicMaterial;
       if ('opacity' in mat) {
-        mat.opacity = THREE.MathUtils.lerp(mat.opacity, animate ? 0.25 : 0.15, 2 * delta);
+        mat.opacity = THREE.MathUtils.lerp(mat.opacity, 0.12, 2 * delta);
       }
     }
   });
 
   return (
     <group>
+      {/* Extended grid that covers the pipeline */}
       <gridHelper
         ref={gridRef}
-        args={[20, 20, '#333333', '#1a1a2e']}
-        position={[5, -4, 0]}
+        args={[20, Math.max(20, gridHeight), '#222233', '#181825']}
+        position={[5, -(currentStepIndex * STEP_Y_SPACING) / 2, -0.1]}
         rotation={[Math.PI / 2, 0, 0]}
       />
 
-      {layers.map((layer) => {
-        const totalElements = layer.blocks.length + layer.connections.length + layer.operations.length;
+      {/* Render each visible step at its Y offset */}
+      {visibleSteps.map((step, stepIdx) => {
+        const yOffset = stepIdx * STEP_Y_SPACING;
+        const isCurrent = stepIdx === currentStepIndex;
+        const isPast = stepIdx < currentStepIndex;
+        // Dim factor: current = 1.0, one step back = 0.45, two back = 0.25, etc.
+        const dimFactor = isCurrent ? 1.0 : Math.max(0.15, 0.45 * Math.pow(0.6, currentStepIndex - stepIdx - 1));
+
+        // Entrance delay: only for the current (latest) step; past steps are already in
+        const baseDelay = isCurrent ? 0.05 : 0;
 
         return (
-          <group key={layer.id}>
-            {/* Blocks */}
-            {layer.blocks.map((block, i) => (
+          <group key={`step-${stepIdx}-${step.id}`} position={[0, -yOffset, 0]}>
+            {/* Step label marker */}
+            <StepLabel
+              text={`${step.phase}`}
+              index={stepIdx}
+              isCurrent={isCurrent}
+              yOffset={yOffset}
+            />
+
+            {/* Data blocks */}
+            {step.blocks.map((block, i) => (
               <DataBlockMesh
-                key={`${layer.id}-b-${block.id}`}
+                key={`s${stepIdx}-b-${block.id}`}
                 block={block}
-                highlighted={!layer.exiting && layer.highlights.includes(block.id)}
-                animate={animate && !layer.exiting}
-                enterDelay={layer.exiting ? 0 : getBlockDelay(i, layer.blocks.length)}
-                exiting={layer.exiting}
-                onExitComplete={() => handleElementExitComplete(layer.id, totalElements)}
+                highlighted={isCurrent && step.highlights.includes(block.id)}
+                animate={animate && isCurrent}
+                enterDelay={baseDelay + i * 0.04}
+                dimFactor={dimFactor}
               />
             ))}
 
-            {/* Connections */}
-            {layer.connections.map((conn, i) => (
+            {/* Intra-step connections */}
+            {step.connections.map((conn, i) => (
               <ConnectionLine
-                key={`${layer.id}-c-${conn.from}-${conn.to}-${i}`}
+                key={`s${stepIdx}-c-${conn.from}-${conn.to}-${i}`}
                 connection={conn}
-                blocks={layer.blocks}
-                animate={animate && !layer.exiting}
-                enterDelay={layer.exiting ? 0 : getConnDelay(i, layer.blocks.length)}
-                exiting={layer.exiting}
-                onExitComplete={() => handleElementExitComplete(layer.id, totalElements)}
+                blocks={step.blocks}
+                animate={animate && isCurrent}
+                enterDelay={baseDelay + step.blocks.length * 0.03 + i * 0.05}
+                dimFactor={dimFactor}
               />
             ))}
 
             {/* Operations */}
-            {layer.operations.map((op, i) => (
+            {step.operations.map((op, i) => (
               <OperationNode
-                key={`${layer.id}-o-${op.id}`}
+                key={`s${stepIdx}-o-${op.id}`}
                 operation={op}
-                animate={animate && !layer.exiting}
-                enterDelay={layer.exiting ? 0 : getOpDelay(i, layer.blocks.length)}
-                exiting={layer.exiting}
-                onExitComplete={() => handleElementExitComplete(layer.id, totalElements)}
+                animate={animate && isCurrent}
+                enterDelay={baseDelay + step.blocks.length * 0.03 + i * 0.04}
+                dimFactor={dimFactor}
               />
             ))}
           </group>
         );
       })}
+
+      {/* Flow connectors between consecutive steps */}
+      {visibleSteps.map((step, stepIdx) => {
+        if (stepIdx === 0) return null;
+        const prevStep = visibleSteps[stepIdx - 1];
+        const yFrom = (stepIdx - 1) * STEP_Y_SPACING;
+        const yTo = stepIdx * STEP_Y_SPACING;
+        const isCurrent = stepIdx === currentStepIndex;
+
+        return (
+          <FlowConnector
+            key={`flow-${stepIdx}`}
+            prevStep={prevStep}
+            nextStep={step}
+            yFrom={yFrom}
+            yTo={yTo}
+            animate={animate && isCurrent}
+            enterDelay={isCurrent ? 0 : 0}
+          />
+        );
+      })}
+    </group>
+  );
+}
+
+// Small label on the left side showing the phase name
+function StepLabel({ text, index, isCurrent, yOffset }: { text: string; index: number; isCurrent: boolean; yOffset: number }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const opacityTarget = isCurrent ? 1 : 0.35;
+  const currentOpacity = useRef(0);
+
+  useFrame((_, delta) => {
+    if (!groupRef.current) return;
+    currentOpacity.current = THREE.MathUtils.lerp(currentOpacity.current, opacityTarget, 4 * delta);
+  });
+
+  return (
+    <group ref={groupRef} position={[-1.2, -0.5, 0]}>
+      {/* Step number pip */}
+      <mesh>
+        <circleGeometry args={[0.15, 16]} />
+        <meshStandardMaterial
+          color={isCurrent ? '#8b5cf6' : '#333344'}
+          emissive={isCurrent ? '#8b5cf6' : '#000000'}
+          emissiveIntensity={isCurrent ? 0.5 : 0}
+          transparent
+          opacity={isCurrent ? 0.9 : 0.4}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* Vertical line connecting step pips */}
+      {index > 0 && (
+        <mesh position={[0, STEP_Y_SPACING / 2, -0.05]}>
+          <planeGeometry args={[0.02, STEP_Y_SPACING - 0.5]} />
+          <meshStandardMaterial
+            color="#333344"
+            transparent
+            opacity={0.3}
+            depthWrite={false}
+          />
+        </mesh>
+      )}
     </group>
   );
 }

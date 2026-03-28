@@ -10,12 +10,10 @@ interface ConnectionLineProps {
   blocks: DataBlock[];
   animate: boolean;
   enterDelay: number;
-  exiting?: boolean;
-  onExitComplete?: () => void;
+  dimFactor?: number;
 }
 
-export default function ConnectionLine({ connection, blocks, animate, enterDelay, exiting, onExitComplete }: ConnectionLineProps) {
-  const groupRef = useRef<THREE.Group>(null);
+export default function ConnectionLine({ connection, blocks, animate, enterDelay, dimFactor = 1 }: ConnectionLineProps) {
   const dotRef = useRef<THREE.Mesh>(null);
   const dotMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
   const arrowRef = useRef<THREE.Mesh>(null);
@@ -25,9 +23,7 @@ export default function ConnectionLine({ connection, blocks, animate, enterDelay
   const progressRef = useRef(0);
   const drawProgress = useRef(0);
   const enterTimer = useRef(0);
-  const exitTimer = useRef(0);
-  const exitNotified = useRef(false);
-  const masterOpacity = useRef(0);
+  const currentDim = useRef(dimFactor);
 
   const fromBlock = blocks.find(b => b.id === connection.from);
   const toBlock = blocks.find(b => b.id === connection.to);
@@ -35,17 +31,7 @@ export default function ConnectionLine({ connection, blocks, animate, enterDelay
   useEffect(() => {
     enterTimer.current = 0;
     drawProgress.current = 0;
-    exitTimer.current = 0;
-    exitNotified.current = false;
-    masterOpacity.current = 0;
   }, [connection.from, connection.to, enterDelay]);
-
-  useEffect(() => {
-    if (exiting) {
-      exitTimer.current = 0;
-      exitNotified.current = false;
-    }
-  }, [exiting]);
 
   const curveData = useMemo(() => {
     if (!fromBlock || !toBlock) return null;
@@ -69,42 +55,29 @@ export default function ConnectionLine({ connection, blocks, animate, enterDelay
   }, [curveData]);
 
   useFrame((_, delta) => {
-    if (!curveData || !groupRef.current) return;
+    if (!curveData) return;
 
-    // Exit animation
-    if (exiting) {
-      exitTimer.current += delta;
-      masterOpacity.current = THREE.MathUtils.lerp(masterOpacity.current, 0, 8 * delta);
-      if (tubeMaterialRef.current) tubeMaterialRef.current.opacity = masterOpacity.current;
-      if (arrowMaterialRef.current) arrowMaterialRef.current.opacity = masterOpacity.current;
-      if (dotMaterialRef.current) dotMaterialRef.current.opacity = 0;
-      if (arrowRef.current) arrowRef.current.scale.setScalar(Math.max(0.001, masterOpacity.current));
-      if (exitTimer.current > 0.3 && !exitNotified.current) {
-        exitNotified.current = true;
-        onExitComplete?.();
-      }
-      return;
-    }
+    currentDim.current = THREE.MathUtils.lerp(currentDim.current, dimFactor, 4 * delta);
+    const dim = currentDim.current;
 
-    // Enter animation
+    // Enter
     enterTimer.current += delta;
     const enterProgress = Math.max(0, Math.min(1, (enterTimer.current - enterDelay) / 0.6));
     const easedDraw = enterProgress < 1 ? 1 - Math.pow(1 - enterProgress, 2) : 1;
     drawProgress.current = THREE.MathUtils.lerp(drawProgress.current, easedDraw, 6 * delta);
-    masterOpacity.current = drawProgress.current;
 
     if (tubeMaterialRef.current) {
-      tubeMaterialRef.current.opacity = (connection.dashed ? 0.35 : 0.55) * drawProgress.current;
+      tubeMaterialRef.current.opacity = (connection.dashed ? 0.3 : 0.5) * drawProgress.current * dim;
     }
 
     if (arrowRef.current && arrowMaterialRef.current) {
       const arrowScale = drawProgress.current > 0.8 ? (drawProgress.current - 0.8) / 0.2 : 0;
       arrowRef.current.scale.setScalar(Math.max(0.001, arrowScale));
-      arrowMaterialRef.current.opacity = 0.8 * arrowScale;
+      arrowMaterialRef.current.opacity = 0.7 * arrowScale * dim;
     }
 
-    // Traveling dot
-    if (connection.animated && animate && dotRef.current && drawProgress.current > 0.5) {
+    // Traveling dot only on current (bright) steps
+    if (connection.animated && animate && dotRef.current && drawProgress.current > 0.5 && dim > 0.5) {
       progressRef.current = (progressRef.current + delta * 1.2) % 1;
       const t = progressRef.current * drawProgress.current;
       const point = curveData.curve.getPoint(t);
@@ -112,7 +85,7 @@ export default function ConnectionLine({ connection, blocks, animate, enterDelay
       dotRef.current.scale.setScalar(1);
       if (dotMaterialRef.current) {
         dotMaterialRef.current.emissiveIntensity = 0.6 + Math.sin(Date.now() * 0.008) * 0.4;
-        dotMaterialRef.current.opacity = drawProgress.current;
+        dotMaterialRef.current.opacity = drawProgress.current * dim;
       }
     } else if (dotRef.current) {
       dotRef.current.scale.setScalar(0.001);
@@ -123,7 +96,7 @@ export default function ConnectionLine({ connection, blocks, animate, enterDelay
   const color = connection.color || '#ffffff';
 
   return (
-    <group ref={groupRef}>
+    <group>
       <mesh geometry={tubeGeometry}>
         <meshStandardMaterial
           ref={tubeMaterialRef}
